@@ -111,7 +111,7 @@ python -m PyInstaller --onefile --windowed --name NSMBW-Profiler run.py
 ```
 
 The GitHub workflow in `.github/workflows/build.yml` does the same for Windows, Linux and macOS when a `v*`
-tag is pushed, and attaches the builds to that release.
+tag is pushed, and attaches the builds to that release (an exe already attached by hand is kept).
 
 ## For the developer
 

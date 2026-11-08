@@ -46,4 +46,9 @@ jobs:
         shell: bash
         run: |
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes ""
-          gh release upload "${GITHUB_REF_NAME}" "dist/${{ matrix.file }}" --clobber
+          # A build already attached by hand (a tested one) is kept.
+          if gh release view "${GITHUB_REF_NAME}" --json assets -q '.assets[].name' | grep -qx "${{ matrix.file }}"; then
+            echo "${{ matrix.file }} is already on the release; keeping it"
+          else
+            gh release upload "${GITHUB_REF_NAME}" "dist/${{ matrix.file }}"
+          fi
