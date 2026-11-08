@@ -6,16 +6,20 @@ import platform
 import queue
 import shutil
 import subprocess
+import sys
 import threading
+import time
 import tkinter as tk
+import traceback
 import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
-from . import __version__, adb as adbmod, releases
+from . import __version__, adb as adbmod, paths, releases
 from .capture import Capture, Options, PACKAGE
 
+LATEST = "Latest release (looked up on github.com at Start)"
 INSTALLED = "Installed version (don't install anything)"
 APK_FILE = "APK file on this computer..."
 TRACE_CHOICES = {  # label: Options.trace
@@ -44,7 +48,23 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._pump)
         self._find_adb()
-        self._load_releases()
+
+    def report_callback_exception(self, kind, error, tb) -> None:
+        """tkinter's hook for an error in a button or other callback: by default it prints to stderr, which the
+        packaged app doesn't have, so the button just seemed to do nothing. Shown and logged instead."""
+        text = "".join(traceback.format_exception(kind, error, tb))
+        log_file = paths.data_dir() / "error.log"
+        try:
+            with open(log_file, "a", encoding="utf-8") as file:
+                file.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} NSMBW Profiler {__version__}\n{text}\n")
+        except OSError:
+            pass
+        self._on_log(text)
+        try:
+            messagebox.showerror("NSMBW Profiler", f"Something went wrong: {error}\n\nDetails are in {log_file}. "
+                                 "Please send that file along.", parent=self)
+        except Exception:  # noqa: BLE001 - a broken dialog must not hide the error again
+            self.attention.configure(text=f"Something went wrong: {error} (details in {log_file})")
 
     # ---- layout ---------------------------------------------------------------------------------------
 
@@ -64,7 +84,7 @@ class App(tk.Tk):
                   wraplength=740).pack(anchor="w")
 
         self.adb_frame = ttk.Frame(self)
-        self.adb_label = ttk.Label(self.adb_frame, text="", wraplength=520)
+        self.adb_label = ttk.Label(self.adb_frame, text="", wraplength=430)
         self.adb_label.pack(side="left")
         self.adb_button = ttk.Button(self.adb_frame, text="Download adb from Google", command=self._download_adb)
         self.adb_button.pack(side="left", padx=8)
@@ -83,10 +103,12 @@ class App(tk.Tk):
 
         version = ttk.LabelFrame(self, text="NSMBW version to test")
         version.pack(fill="x", **pad)
-        self.version_box = ttk.Combobox(version, state="readonly", width=60)
+        self.version_box = ttk.Combobox(version, state="readonly", width=60, values=[LATEST, INSTALLED, APK_FILE])
+        self.version_box.set(LATEST)
         self.version_box.pack(side="left", padx=8, pady=6)
         self.version_box.bind("<<ComboboxSelected>>", lambda e: self._version_chosen())
-        ttk.Button(version, text="Refresh", command=self._load_releases).pack(side="left")
+        self.older_button = ttk.Button(version, text="Older versions", command=self._load_releases)
+        self.older_button.pack(side="left")
         self.installed_note = ttk.Label(version, text="")
         self.installed_note.pack(side="left", padx=8)
 
@@ -218,15 +240,18 @@ class App(tk.Tk):
             self.device_note.configure(text="No phone found: plug it in with USB debugging on, then Refresh.")
 
     def _on_releases(self, data) -> None:
+        self.older_button.configure(state="normal")
         if isinstance(data, str):
-            self.version_box["values"] = [INSTALLED, APK_FILE]
-            self.version_box.set(INSTALLED)
-            self._on_log(f"Couldn't list the releases on GitHub: {data}")
+            self.installed_note.configure(text="")
+            messagebox.showinfo("NSMBW Profiler", f"Couldn't get the list of versions from github.com ({data}).\n\n"
+                                "'Latest release' still works: it's looked up when you press Start.", parent=self)
             return
         self.release_list = data
-        self.version_box["values"] = [r.label for r in data] + [INSTALLED, APK_FILE]
-        latest = next((r for r in data if r.latest), data[0] if data else None)
-        self.version_box.set(latest.label if latest else INSTALLED)
+        current = self.version_box.get()
+        others = [v for v in self.version_box["values"] if v != LATEST and v not in {r.label for r in data}]
+        self.version_box["values"] = [LATEST] + [r.label for r in data] + others
+        self.version_box.set(current)
+        self.older_button.configure(text=f"{len(data)} versions listed")
 
     def _on_installed(self, text: str) -> None:
         self.installed_note.configure(text=text)
@@ -266,6 +291,8 @@ class App(tk.Tk):
             self._background(self.adb.devices, "devices")
 
     def _load_releases(self) -> None:
+        """Only when asked: the default, Latest, needs nothing until Start."""
+        self.older_button.configure(state="disabled")
         self._background(releases.list_releases, "releases")
 
     def _selected_device(self) -> adbmod.Device | None:
@@ -297,9 +324,11 @@ class App(tk.Tk):
                 self.version_box["values"] = values
                 self.version_box.set(label)
             else:
-                self.version_box.set(INSTALLED)
+                self.version_box.set(LATEST)
 
-    def _options(self) -> Options | None:
+    def _read_options(self) -> Options | None:
+        # Not "_options": tkinter calls the window's _options() inside every dialog (messagebox, file picker).
+        # A method of that name here broke all of them in 1.0.0, so Start did nothing.
         device = self._selected_device()
         if not self.adb or not device:
             messagebox.showinfo("NSMBW Profiler", "Pick a phone first.", parent=self)
@@ -318,7 +347,9 @@ class App(tk.Tk):
         choice = self.version_box.get()
         options = Options(serial=device.serial, worlds=worlds, play_seconds=seconds,
                           trace=TRACE_CHOICES.get(self.trace.get(), "detailed"))
-        if choice == INSTALLED:
+        if choice == LATEST:
+            options.version = "latest"
+        elif choice == INSTALLED:
             options.version = "installed"
         elif choice.startswith("File: ") and self.apk_file:
             options.version, options.apk_file = "file", self.apk_file
@@ -331,7 +362,7 @@ class App(tk.Tk):
         return options
 
     def _start(self) -> None:
-        options = self._options()
+        options = self._read_options()
         if options is None:
             return
         minutes = round(2 + len(options.worlds) * (options.play_seconds + 75) / 60)
@@ -401,6 +432,9 @@ class App(tk.Tk):
 
 
 def main() -> None:
+    if sys.stderr is None:  # the packaged (windowed) app has no console: keep its output in a log file
+        log = open(paths.data_dir() / "app.log", "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stderr = log
     if os.name == "nt":
         try:
             import ctypes

@@ -42,8 +42,9 @@ class RunError(Exception):
 @dataclass
 class Options:
     serial: str
-    version: str = "release"  # "release", "installed" or "file"
+    version: str = "latest"  # "latest", "release" (the one below), "installed" or "file"
     release: releases.Release | None = None
+    repo: str = releases.DEFAULT_REPO
     apk_file: Path | None = None
     worlds: list[int] = field(default_factory=lambda: list(range(1, 10)))
     play_seconds: int = 60
@@ -251,13 +252,30 @@ class Capture:
         self.log(f"Installed now: NSMBW {before['versionName']} (code {before['versionCode']})")
         build = {"installed_before": before["versionName"], "source": self.o.version}
         local_apk = None
-        if self.o.version == "release":
-            release = self.o.release
-            build["release"] = release.tag
-            self.log(f"Getting {release.apk_name} ({release.apk_size / 1e6:.0f} MB; downloaded from GitHub once, then kept)")
-            local_apk = releases.download_apk(
-                release, lambda f: self.ui("step", (f"Downloading {release.tag}: {f * 100:.0f}%", 0.03 + 0.03 * f)),
-                self.cancel.is_set)
+        if self.o.version in ("latest", "release"):
+            try:
+                if self.o.version == "latest":
+                    self.log("Asking github.com which release is the newest")
+                    release = releases.latest(self.o.repo)
+                else:
+                    release = self.o.release
+                build["release"] = release.tag
+                if releases.cached_apk(release):
+                    self.log(f"Using {release.apk_name}, downloaded before")
+                else:
+                    self.log(f"Downloading {release.apk_name} from github.com (it's kept for next time)")
+                local_apk = releases.download_apk(
+                    release, self.o.repo,
+                    lambda f: self.ui("step", (f"Downloading {release.tag}: {f * 100:.0f}%", 0.03 + 0.03 * f)),
+                    self.cancel.is_set)
+            except releases.NoApk as error:
+                raise RunError(f"{error}. Pick another version.") from error
+            except InterruptedError as error:
+                raise Cancelled() from error
+            except (OSError, ValueError) as error:
+                raise RunError(f"Couldn't get the NSMBW release from github.com ({error}). Check the internet "
+                               "connection and press Start again, or pick 'Installed version' to test what's on the "
+                               "phone.") from error
         elif self.o.version == "file":
             local_apk = self.o.apk_file
             build["apk_file"] = local_apk.name

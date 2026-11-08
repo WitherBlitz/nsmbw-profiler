@@ -25,10 +25,11 @@ PC already, the app offers to download Google's official platform-tools (about 7
 
 1. Download `NSMBW-Profiler.exe` from the Releases page and open it.
 2. Plug in the phone and pick it under **Phone**.
-3. Under **NSMBW version to test**, keep the latest release or pick another one. The app installs it over
-   the existing one with `adb install -r`, which keeps your saves, settings and game files. (Android can't go
-   back to an older version than the one installed without deleting the game's data, so the app refuses that.)
-   *Installed version* tests what's on the phone; *APK file…* installs a build from your PC.
+3. Under **NSMBW version to test**, keep *Latest release*, or press **Older versions** to pick one of the
+   ten newest. The app installs it over the existing one with `adb install -r`, which keeps your saves,
+   settings and game files. (Android can't go back to an older version than the one installed without
+   deleting the game's data, so the app refuses that.) *Installed version* tests what's on the phone and
+   needs no internet; *APK file…* installs a build from your PC.
 4. Press **Start**, keep the phone unlocked and plugged in, and don't touch it. A full run (9 levels, 60 s
    each) takes about 25 minutes.
 5. When it says **DONE!**, press **Save .zip…** and send that file.
@@ -58,6 +59,11 @@ The **System trace** setting picks how much Perfetto records: *Detailed* (about 
 
 **Privacy:** the zip contains the phone's model, its serial number and build, the game's settings file, and
 Android's system log for the run, which can include other apps' messages.
+
+**Internet:** nothing is sent anywhere. The app only downloads, and only when it needs to: at Start, from
+github.com, which release is the newest and its APK (an APK downloaded once is kept and reused); the list of
+versions when you press *Older versions*; and adb from Google if you ask for it. It doesn't use GitHub's API,
+and temporary errors (like a 504) are retried.
 
 ## How it plays, and why your save is safe
 

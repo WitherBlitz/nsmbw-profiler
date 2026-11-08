@@ -23,18 +23,13 @@ def cli(argv: list[str]) -> int:
 
     path = adbmod.find_adb() or adbmod.download_platform_tools()
     options = Options(serial=args.serial, worlds=[int(w) for w in args.worlds.split(",") if w.strip()],
-                      play_seconds=max(30, min(180, args.seconds)), trace=args.trace)
+                      play_seconds=max(30, min(180, args.seconds)), trace=args.trace, repo=args.repo)
     if args.apk:
         options.version, options.apk_file = "file", args.apk
-    elif args.version == "installed":
-        options.version = "installed"
+    elif args.version in ("installed", "latest"):
+        options.version = args.version
     else:
-        found = releases.list_releases(args.repo)
-        pick = next((r for r in found if (r.latest if args.version == "latest" else r.tag == args.version)), None)
-        if pick is None:
-            print(f"no release {args.version} with an Android APK", file=sys.stderr)
-            return 2
-        options.release = pick
+        options.version, options.release = "release", releases.Release(args.version)
 
     def ui(kind, payload):
         if kind == "log":
